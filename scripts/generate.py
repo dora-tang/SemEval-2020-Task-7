@@ -1,8 +1,15 @@
-# generate command for task1
-
 from itertools import product
+import sys
 
-prefix = 'python main.py -epochs 10 -lr 0.001 -bsz 32 -do_train -do_eval -save_model -track '
+task = sys.argv[1]
+
+# generate command for task1
+if task == 1:
+    prefix = 'python main.py -task task1 -epochs 10 -lr 0.001 -bsz 32 -do_train -do_eval -save_model -track'
+
+# generate command for task2
+elif task == 2:
+    prefix = 'python main.py -task task2 -epochs 10 -lr 0.001 -bsz 16 -do_train -do_eval -save_model -track'
 
 
 param_base = {

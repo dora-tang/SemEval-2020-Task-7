@@ -43,6 +43,6 @@ esac
 ```
 
 ## 2 Data
-- see *data*= directory
+- see *data* directory
 - datasets: **Humicroedit** (official task data) and **Funlines** (additional data)
 - source: https://www.cs.rochester.edu/u/nhossain/humicroedit.html

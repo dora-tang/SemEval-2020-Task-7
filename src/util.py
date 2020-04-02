@@ -11,24 +11,25 @@ import pandas as pd
 from tqdm import tqdm
 import json
 import shutil
+import logging as log
 
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
 import torch.nn as nn
 from torch.nn.utils.clip_grad import clip_grad_norm_
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, PackedSequence
 
-from allennlp.modules.scalar_mix import ScalarMix
+# must import before torchtext.data, otherwise will override name
 from transformers import *
 
 from torchtext import data
 from torchtext.vocab import Vectors
 from torchtext.vocab import GloVe
 
-# import _pickle as pkl
+from allennlp.modules.scalar_mix import ScalarMix
 
-import logging as log
+# from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, PackedSequence
+# import _pickle as pkl
 # print = log.info
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -55,7 +56,7 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-def init_transformers():
+def transformers_dict():
     MODELS = [
         (BertModel,       BertTokenizer,       'bert-base-uncased'),
         (BertModel,       BertTokenizer,       'bert-large-uncased'),
@@ -78,26 +79,22 @@ def init_transformers():
     return MODELS_DICT
 
 
-def read_csv_split(train_path, valid_path, final_valid_path, no_split=False):
-    df_list = []
-    for i in train_path:
-        #train = pd.read_csv(train_path)
-        df_list.append(pd.read_csv(i))
-    train = pd.concat(df_list)
-    valid = pd.read_csv(valid_path)
-    final_valid = pd.read_csv(final_valid_path)
-
-    if no_split:
-        test = valid
-    else:
-        # split
-        test = valid[-1000:]
-        test = test.reset_index(drop=True)
-        valid = valid[:-1000]
-        valid = valid.reset_index(drop=True)
-
-    return train, valid, test, final_valid
-
+def init_transformers(model_name):
+    MODELS_DICT = transformers_dict()
+    model_class, tokenizer_class = MODELS_DICT[model_name]
+    try:
+        cache_dir = os.environ['HUGGINGFACE_TRANSFORMERS_CACHE']
+    except KeyError as e:
+        log.info('ERROR: environment variable HUGGINGFACE_TRANSFORMERS_CACHE not found'
+                 + '\n\tmust define cache directory for huggingface transformers'
+                 + '\n\tRUN THIS: export HUGGINGFACE_TRANSFORMERS_CACHE=/your/path'
+                 + '\n\tyou should also append the line to ~/.bashrc (linux) or ~/.bash_profile (mac)'
+                 + '\n')
+        raise
+    tokenizer = tokenizer_class.from_pretrained(model_name, cache_dir=cache_dir)
+    transformer = model_class.from_pretrained(
+        model_name, cache_dir=cache_dir, output_hidden_states=True)
+    return tokenizer, transformer
 
 
 def tokenize_and_cut(sentence, tokenizer):
@@ -154,62 +151,63 @@ class RMSE():
         self.sum_of_square = 0
 
 
-class Classifier(nn.Module):
-    def __init__(self, d_inp, n_classes, cls_type="log_reg", dropout=0.2, d_hid=512):
-        super().__init__()
+def args_default_path(args, default_data_dir):
+    def default_path(path, default_path):
+        if len(path) == 0:
+            path = default_path
+        return path
 
-        # logistic regression
-        if cls_type == "log_reg":
-            classifier = nn.Linear(d_inp, n_classes)
-        # mlp
-        elif cls_type == "mlp":
-            classifier = nn.Sequential(
-                nn.Linear(d_inp, d_hid),
-                nn.Tanh(),
-                nn.LayerNorm(d_hid),
-                nn.Dropout(dropout),
-                nn.Linear(d_hid, n_classes),
-            )
-        self.classifier = classifier
-
-    def forward(self, seq_emb):
-        logits = self.classifier(seq_emb)
-        return logits
+    args.train_path = default_path(args.train_path, os.path.join(default_data_dir, "train.csv"))
+    args.train_extra_path = default_path(
+        args.train_path, os.path.join(default_data_dir, "train_funlines.csv"))
+    args.val_path = default_path(args.val_path, os.path.join(default_data_dir, "dev.csv"))
+    args.test_with_label_path = default_path(
+        args.test_with_label_path, os.path.join(default_data_dir, "test_with_label.csv"))
+    args.test_without_label_path = default_path(
+        args.test_without_label_path, os.path.join(default_data_dir, "test_without_label.csv"))
+    return args
 
 
-class Pooler(nn.Module):
-    """ Do pooling, possibly with a projection beforehand """
+def get_task(args, get_dataset, text_field, mask_token):
 
-    def __init__(self, project=True, d_inp=512, d_proj=512, pool_type="max"):
-        super(Pooler, self).__init__()
-        self.project = nn.Linear(d_inp, d_proj) if project else lambda x: x
-        self.pool_type = pool_type
+    def read_task(
+            train_path=None,
+            val_path=None,
+            test_with_label_path=None,
+            test_without_label_path=None):
+        task = {}
+        log.info('')
+        for split_name, path in[('train_data', 'train_path'), ('val_data', 'val_path'),
+                                ('test_with_label_data', 'test_with_label_path'),
+                                ('test_without_label_data', 'test_without_label_path')]:
+            path = eval(path)
+            if path is not None:
+                log.info(f'read {split_name} from {path}')
+                if split_name == 'train_data':
+                    split = pd.concat([pd.read_csv(i) for i in path])
+                else:
+                    split = pd.read_csv(path)
 
-    def forward(self, sequence, mask=None):
-        """
-        sequence: (bsz, T, d_inp)
-        mask: nopad_mask (bsz, T) or (bsz, T, 1)
-        """
+                task[f'{split_name}'] = get_dataset(
+                    csv_data=split, text_field=text_field, preprocess=args.model, mask_token=mask_token)
 
-        # sequence is (bsz, d_inp), no need to pool
-        if len(sequence.shape) == 2:
-            return sequence
+        for split_name in task.keys():
+            length = len(task[f'{split_name}'])
+            log.info(f'Number of examples in {split_name}: {length}')
+        return task
 
-        # no pad in sequence
-        if mask is None:
-            mask = torch.ones(sequence.shape[:2], device=device)
+    if args.train_extra:
+        train_path_list = [args.train_path, args.train_extra_path]
+    else:
+        train_path_list = [args.train_path]
+    val_path = test_with_label_path = test_without_label_path = None
+    if args.do_train:
+        val_path = args.val_path
+    if args.do_eval:
+        test_with_label_path = args.test_with_label_path
+    if args.do_predict:
+        test_without_label_path = args.test_without_label_path
 
-        if len(mask.size()) < 3:
-            mask = mask.unsqueeze(dim=-1)  # (bsz, T, 1)
-        pad_mask = (mask == 0)
-        proj_seq = self.project(sequence)  # (bsz, T, d_proj) or (bsz, T, d_inp)
-
-        if self.pool_type == "max":
-            proj_seq = proj_seq.masked_fill(pad_mask, -float("inf"))
-            seq_emb = proj_seq.max(dim=1)[0]
-
-        elif self.pool_type == "mean":
-            proj_seq = proj_seq.masked_fill(pad_mask, 0)
-            seq_emb = proj_seq.sum(dim=1) / mask.sum(dim=1).float()
-
-        return seq_emb
+    task = read_task(train_path=train_path_list, val_path=val_path, test_without_label_path=test_without_label_path,
+                     test_with_label_path=test_with_label_path)
+    return task
