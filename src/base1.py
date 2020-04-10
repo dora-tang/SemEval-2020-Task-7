@@ -34,8 +34,6 @@ def get_dataset(csv_data, text_field, preprocess='cbow', mask_token=None):
 
     def preprocess_transformer(train, mask_token):
         # log.info('preprocess for transformer')
-        # mask_token = tokenizer.mask_token
-
         new_list = []
         original = train['original']
         edit = train['edit']
@@ -80,7 +78,9 @@ def get_dataset(csv_data, text_field, preprocess='cbow', mask_token=None):
     return data.Dataset(examples, field)
 
 
-def _train(args, model, batch, optimizer):
+def _train(args, model, batch, optimizer, scorer):
+    bsz = len(batch.id)
+
     criterion = nn.MSELoss(reduction='sum')
     model.train()
     optimizer.zero_grad()
@@ -91,39 +91,53 @@ def _train(args, model, batch, optimizer):
     # criterion2 = nn.MarginRankingLoss(margin=0.0, size_average=None, reduce=None, reduction='sum')
     # loss2 = criterion2(predictions[1], predictions[0], torch.ones_like(batch.meanGrade))
     # loss += loss2
-    bsz = len(batch.meanGrade)
+
     loss.div(bsz).backward()
     clip_grad_norm_(model.parameters(), args.grad_norm)
     optimizer.step()
+
+    scorer.update_metrics(sse=loss.item(), num=bsz)
+
     return loss
 
 
-def _evaluate(args, model, val_data):
+def evaluate(args, model, val_data):
     iterator = data.BucketIterator(
         val_data, batch_size=args.bsz,
         sort_key=lambda x: len(x.original),
         sort_within_batch=False,
         shuffle=False,
         device=device)
+
     criterion = nn.MSELoss(reduction='sum')
-    epoch_loss = 0
-    scorer = RMSE()
+    scorer = RegressionMetrics(loss=True, rmse=True, rmse_plus=True, spearman=True, pearson=True)
+
+    # epoch_loss = 0
     model.eval()
+
     with torch.no_grad():
         for batch in iterator:
             predictions = model(batch)
             loss = criterion(predictions, batch.meanGrade)
             bsz = len(batch.meanGrade)
-            epoch_loss += loss.item()
-            # scorer.accumulate(predictions, batch.meanGrade)
-            scorer.accumulate(loss.item(), bsz)
-        rmse = scorer.calculate(clear=True)
-        val_loss = epoch_loss / len(iterator)
-        log.info(f'\tValid Loss: {val_loss:.4f} | Valid RMSE: {rmse:.4f}')
-    return val_loss
+            # epoch_loss += loss.item()
+            scorer.update_metrics(sse=loss.item(), num=bsz,
+                                  predictions=predictions, labels=batch.meanGrade)
+
+        metrics = scorer.get_metrics(reset=False)
+        # loss = epoch_loss / len(iterator)
+        # log_template = [f"loss: {loss:<7.4f}"]
+        log_template = []
+        for k, v in metrics.items():
+            log_template += [f"{k}: {v:.4f}"]
+        log_string = " | ".join(log_template)
+        phase = "Validation"
+        log.info(f"{phase:<10} | " + log_string)
+
+    return metrics
 
 
-def train_loop(args, model, optimizer, train_data, val_data):
+def train_loop(args, model, optimizer, train_data, val_data,):
     train_iterator = data.BucketIterator(
         train_data, batch_size=args.bsz,
         sort_key=lambda x: len(x.original),
@@ -134,12 +148,21 @@ def train_loop(args, model, optimizer, train_data, val_data):
     model = model.to(device)
     best_val_loss = float('inf')
     best_epoch = -1
+    global_step = 0
+
+    if args.tensorboard:
+        TB_train_log = SummaryWriter(os.path.join(args.exp_dir, 'tensorboard_train'))
+        TB_validation_log = SummaryWriter(os.path.join(args.exp_dir, 'tensorboard_val'))
+
+    args.t_total = len(train_iterator) * args.epochs
+    scheduler = Scheduler(args, optimizer)
+    scorer = RegressionMetrics(loss=True, rmse=True, rmse_plus=False, spearman=False, pearson=False)
 
     try:
         for epoch in range(1, args.epochs+1):
             log.info(f'\nEpoch: {epoch:02}')
-            train_loss = 0
-            scorer = RMSE()
+            # train_loss = 0
+            scorer.reset()
 
             if args.track:
                 # track training time
@@ -151,75 +174,56 @@ def train_loop(args, model, optimizer, train_data, val_data):
                 # check if batch is shuffled between train epochs
                 # if idx == 1:
                 #     log.info(batch.original[0])
-                loss = _train(args, model, batch, optimizer)
-                train_loss += loss.item()
-                bsz = len(batch.id)
-                scorer.accumulate(loss.item(), bsz)
+                loss = _train(args, model, batch, optimizer, scorer)
+                # print(optimizer.state)
+                scheduler.step()
+                global_step += 1
+                # print(scheduler.get_lr()[0])
+                # train_loss += loss.item()
 
                 # log every 1/3 epoch
                 log_interval = len(train_iterator) // 3
                 if idx % log_interval == 0:
-                    rmse = scorer.calculate(clear=False)
                     log.info(f'{idx} / {len(train_iterator)}')
-                    log.info(f'\tTrain Loss: {train_loss/idx:.4f} | Train RMSE: {rmse:.4f}')
-                    val_loss = _evaluate(args, model, val_data)
+                    # log_template = [f"loss: {train_loss/idx:<7.4f}"]
+                    log_template = []
+                    # calculate train metric
+                    metrics = scorer.get_metrics(reset=False)
+                    for k, v in metrics.items():
+                        log_template += [f"{k}: {v:.4f}"]
+                    log_string = " | ".join(log_template)
+                    phase = "Train"
+                    log.info(f"{phase:<10} | " + log_string)
+
+                    if args.tensorboard:
+                        for key, value in metrics.items():
+                            TB_train_log.add_scalar(key, value, global_step)
+
+                    # calculate validation metric
+                    val_metrics = evaluate(args, model, val_data)
+                    val_loss = val_metrics['loss']
+                    scheduler.step(val_loss)
+
+                    if args.tensorboard:
+                        for key, value in val_metrics.items():
+                            TB_validation_log.add_scalar(key, value, global_step)
 
                     if val_loss < best_val_loss:
                         best_val_loss = val_loss
                         best_model = copy.deepcopy(model)
                         log.info(f"\t[Best validation loss found]")
                         best_epoch = epoch
-                        # best_model_state = copy.deepcopy(model.state_dict())
-                        # torch.save(model.state_dict(), 'task-1-diff-bilstm-model.pth')
+
     except KeyboardInterrupt:
         pass
+
+    if args.tensorboard:
+        TB_train_log.close()
+        TB_validation_log.close()
 
     log.info('\nFinish training.')
     log.info(f'Best Epoch: {best_epoch}')
     return best_model
-
-
-def calc_rmse(args, model, test_data, all=True):
-    """
-    for test data with label
-    calculate RMSE
-    if all=True: also calculate RMSE@10, 20, 30, 40
-    """
-    iterator = data.BucketIterator(
-        test_data, batch_size=args.bsz,
-        sort_key=lambda x: len(x.original),
-        sort_within_batch=False,
-        shuffle=False,
-        device=device)
-
-    pred_list = []
-    real_list = []
-
-    model.eval()
-    with torch.no_grad():
-        for batch in iterator:
-            predictions = model(batch)
-            pred = predictions.data.tolist()
-            real = batch.meanGrade.data.tolist()
-
-            real_list += real
-            pred_list += pred
-
-    df = pd.DataFrame({'real': real_list, 'pred': pred_list})
-
-    rmse = np.sqrt(np.mean((df['real'] - df['pred']) ** 2))
-    log.info(f'RMSE: {rmse:.6f}')
-
-    if all:
-        df = df.sort_values(by=['real'], ascending=False)
-        for percent in [10, 20, 30, 40]:
-            size = math.ceil(len(df) * percent * 0.01)
-            # top n % + bottom n %
-            df2 = df[:size].append(df[-size:])
-            rmse = np.sqrt(np.mean((df2['real'] - df2['pred'])**2))
-            log.info(f'\tRMSE@{percent}: {rmse:.6f}')
-
-    return df
 
 
 def write_prediction(args, model, test_data, out_path, mode='minimal', in_path=''):
@@ -245,10 +249,6 @@ def write_prediction(args, model, test_data, out_path, mode='minimal', in_path='
             pred_list += predictions.data.tolist()
             id_list += batch.id
 
-            # if mode == 'minimal':
-            # test without label, minimal prediction for semeval submission
-            # rows = {'id': batch.id, 'pred': pred}
-            # df = pd.DataFrame(rows)
             # if idx == 0:
             #     df.to_csv(out_path, index=False, mode='w', header=True)
             # else:
@@ -256,6 +256,7 @@ def write_prediction(args, model, test_data, out_path, mode='minimal', in_path='
 
     df_out = pd.DataFrame({'id': id_list, 'pred': pred_list})
     if mode == 'minimal':
+        # test without label, minimal prediction for semeval submission
         df = df_out[['id', 'pred']]
     elif mode == 'analysis':
         df_in = pd.read_csv(in_path).drop('grades', axis=1)

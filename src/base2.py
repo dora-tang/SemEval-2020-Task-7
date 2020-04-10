@@ -43,7 +43,6 @@ def get_dataset(csv_data, text_field, preprocess='cbow', mask_token=None):
             train[f'mask{j}'] = mask_list
         return train
 
-    # # log.info("read data from csv")
     examples = []
 
     if preprocess == 'cbow':
@@ -95,47 +94,6 @@ def get_dataset(csv_data, text_field, preprocess='cbow', mask_token=None):
 
     return data.Dataset(examples, field)
 
-# accuracy and reward
-
-
-class Scorer2():
-    def __init__(self):
-        self.n_instance = 0
-        self.correct = 0.
-        self.reward = 0.
-
-    def accumulate(self, pred, label, diff):
-        label = label.long().detach()
-        pred = pred.long().detach()
-        diff = diff.abs().detach()
-
-        # number of true labels with 1 or 2, ignore 0
-        label_mask = (label != 0).float()
-        num = label_mask.sum()
-        self.n_instance += num
-
-        # acc
-        correct = (pred == label).float() * label_mask
-        self.correct += correct.sum()
-
-        # reward
-        correct_mask = (pred == label).float()
-        wrong_mask = (pred != label).float()
-        reward = diff * (correct_mask - wrong_mask) * label_mask
-        self.reward += reward.sum()
-
-    def calculate(self, clear=True):
-        acc = float(self.correct) / self.n_instance
-        reward = float(self.reward) / self.n_instance
-        if clear:
-            self._clear()
-        return acc, reward
-
-    def _clear(self):
-        self.n_instance = 0
-        self.correct = 0
-        self.reward = 0
-
 
 def write_prediction(args, model, test_data, out_path, mode='minimal', in_path=''):
     iterator = data.BucketIterator(
@@ -173,9 +131,9 @@ def write_prediction(args, model, test_data, out_path, mode='minimal', in_path='
         df['score1'] = round(df['score1'], 6)
         df['score2'] = round(df['score2'], 6)
         df = df[['id',
-                'original1', 'edit1', 'meanGrade1', 'score1',
-                'original2', 'edit2', 'meanGrade2', 'score2',
-                'label', 'pred']]
+                 'original1', 'edit1', 'meanGrade1', 'score1',
+                 'original2', 'edit2', 'meanGrade2', 'score2',
+                 'label', 'pred']]
 
     df.to_csv(out_path, index=False, mode='w')
     log.info(f'Save prediction to {out_path}')
@@ -183,8 +141,9 @@ def write_prediction(args, model, test_data, out_path, mode='minimal', in_path='
     return df
 
 
-def _train(args, model, batch, optimizer, scorer):
+def _train(args, model, batch, optimizer, cls_scorer, reg_scorer):
     criterion = nn.MSELoss(reduction='sum')
+    bsz = len(batch.id)
 
     model.train()
     optimizer.zero_grad()
@@ -193,10 +152,6 @@ def _train(args, model, batch, optimizer, scorer):
     loss2 = criterion(prediction2, batch.meanGrade2)
     loss_mse = loss1 + loss2
     #loss = loss1 / 2 + loss2 / 2
-
-    scorer.accumulate(pred=pred_label, label=batch.label,
-                      diff=(batch.meanGrade1-batch.meanGrade2).abs())
-
     # if rankingloss:
     #     criterion2 = nn.MarginRankingLoss(
     #         margin=0.0, size_average=None, reduce=None, reduction='none')
@@ -260,10 +215,14 @@ def _train(args, model, batch, optimizer, scorer):
     # else:
     #     loss = loss_mse
     loss = loss_mse
-    bsz = len(batch.id)
     loss.div(bsz).backward()
     clip_grad_norm_(model.parameters(), args.grad_norm)
     optimizer.step()
+
+    # update metrics
+    cls_scorer.update_metrics(predictions=pred_label, labels=batch.label,
+                              diff=(batch.meanGrade1-batch.meanGrade2).abs(), loss=loss.item(), bsz=bsz)
+    reg_scorer.update_metrics(sse=loss_mse.item(), num=bsz*2)
 
     return loss, loss_mse
 
@@ -278,13 +237,16 @@ def evaluate(args, model, val_data):
         device=device)
 
     criterion = nn.MSELoss(reduction='sum')
-    epoch_loss = 0
-    model.eval()
-    scorer = RMSE()
+    cls_scorer = ClassificationMetrics(loss=True, acc_reward=True, f1=False)
+    reg_scorer = RegressionMetrics(loss=False, rmse=True, rmse_plus=False,
+                                   spearman=True, pearson=True)
 
-    scorer2 = Scorer2()
+    #epoch_loss = 0
+    model.eval()
+
     with torch.no_grad():
         for batch in iterator:
+            bsz = len(batch.id)
             prediction1, prediction2, pred_label = model(batch)
 
             # pred_label3 = torch.argmax(prediction3, dim=-1) + 1
@@ -309,22 +271,35 @@ def evaluate(args, model, val_data):
             # else:
             #     loss = loss_mse
             loss = loss_mse
+            #epoch_loss += loss.item()
 
-            bsz = len(batch.id)
-            epoch_loss += loss.item()
+            # update metrics
+            reg_scorer.update_metrics(sse=loss_mse.item(), num=bsz*2,
+                                      predictions=torch.stack(
+                                          [prediction1, prediction2], dim=-1).flatten(),
+                                      labels=torch.stack([batch.meanGrade1, batch.meanGrade2], dim=-1).flatten())
+            cls_scorer.update_metrics(predictions=pred_label, labels=batch.label,
+                                      diff=(batch.meanGrade1-batch.meanGrade2).abs(), loss=loss.item(), bsz=bsz)
 
-            scorer.accumulate(loss_mse.item() / 2, bsz)
-            scorer2.accumulate(pred=pred_label,
-                               label=batch.label,
-                               diff=(batch.meanGrade1-batch.meanGrade2).abs())
+        #val_loss = epoch_loss / len(iterator)
+        #log_template = [f"loss: {val_loss:<7.4f}"]
+        #  print(len(iterator))
+        log_template = []
 
-        rmse = scorer.calculate(clear=True)
-        acc, reward = scorer2.calculate(clear=True)
+        # calculate metrics
+        reg_metrics = reg_scorer.get_metrics(reset=False)
+        cls_metrics = cls_scorer.get_metrics(reset=False)
+        metrics = cls_metrics
+        metrics.update(reg_metrics)
+        for k, v in metrics.items():
+            log_template += [f"{k}: {v:.4f}"]
+        log_string = " | ".join(log_template)
 
-        valid_loss = epoch_loss / len(iterator)
-        log.info(
-            f'\tValid Loss: {valid_loss:.4f} | Valid RMSE: {rmse:.4f} | Valid Acc: {acc :.4f} | Valid Reward: {reward :.4f}')
-    return acc
+        # print metrics
+        phase = "Validation"
+        log.info(f"{phase:<10} | " + log_string)
+        #acc = metrics['accuracy']
+    return metrics
 
 
 def train_loop(args, model, optimizer, train_data, val_data):
@@ -337,46 +312,82 @@ def train_loop(args, model, optimizer, train_data, val_data):
         device=device)
 
     model = model.to(device)
-    best_valid_acc = float(-0.1)
+    best_val_acc = -float('inf')
     best_epoch = -1
+    global_step = 0
+
+    if args.tensorboard:
+        TB_train_log = SummaryWriter(os.path.join(args.exp_dir, 'tensorboard_train'))
+        TB_validation_log = SummaryWriter(os.path.join(args.exp_dir, 'tensorboard_val'))
+
+    args.t_total = len(train_iterator) * args.epochs
+    scheduler = Scheduler(args, optimizer)
 
     try:
         for epoch in range(1, args.epochs+1):
             log.info(f'Epoch: {epoch:02}')
-            train_loss = 0
-            scorer = RMSE()
-            scorer2 = Scorer2()
+            # train_loss = 0
+
+            cls_scorer = ClassificationMetrics(loss=True, acc_reward=True, f1=False)
+            reg_scorer = RegressionMetrics(loss=False, rmse=True, rmse_plus=False,
+                                           spearman=False, pearson=False)
 
             if args.track:
                 # track training time
                 generator = tqdm(enumerate(train_iterator, 1), total=len(train_iterator))
             else:
                 generator = enumerate(train_iterator, 1)
+
             for idx, batch in generator:
-                loss, loss_mse = _train(args, model, batch, optimizer, scorer2)
-                train_loss += loss.item()
-                bsz = len(batch.id)
-                scorer.accumulate(loss_mse.item() / 2, bsz)
+                global_step += 1
+                loss, loss_mse = _train(args, model, batch, optimizer, cls_scorer, reg_scorer)
+                scheduler.step()
+
+                # train_loss += loss.item()
 
                 # log every 1/3 epoch
                 log_interval = len(train_iterator) // 3
                 if idx % log_interval == 0:
-                    rmse = scorer.calculate(clear=False)
-                    acc, reward = scorer2.calculate(clear=False)
                     log.info(f'{idx} / {len(train_iterator)}')
-                    log.info(
-                        f'\tTrain Loss: {train_loss/idx:.4f} | Train RMSE: {rmse:.4f} | Train Acc: {acc:.4f} | Train Reward: {reward:.4f}')
-                    valid_acc = evaluate(args, model, val_data)
+                    log_template = []
+                    # log_template = [f"loss: {train_loss/idx:<7.4f}"]
 
-                    if valid_acc > best_valid_acc:
-                        best_valid_acc = valid_acc
+                    # calculate train metrics
+                    reg_metrics = reg_scorer.get_metrics(reset=False)
+                    cls_metrics = cls_scorer.get_metrics(reset=False)
+                    metrics = cls_metrics
+                    metrics.update(reg_metrics)
+                    for k, v in metrics.items():
+                        log_template += [f"{k}: {v:.4f}"]
+                    log_string = " | ".join(log_template)
+
+                    if args.tensorboard:
+                        for key, value in metrics.items():
+                            TB_train_log.add_scalar(key, value, global_step)
+
+                    phase = "Train"
+                    log.info(f"{phase:<10} | " + log_string)
+
+                    val_metrics = evaluate(args, model, val_data)
+                    val_acc = val_metrics['accuracy']
+                    scheduler.step(val_acc)
+
+                    if args.tensorboard:
+                        for key, value in val_metrics.items():
+                            TB_validation_log.add_scalar(key, value, global_step)
+
+                    if val_acc > best_val_acc:
+                        best_val_acc = val_acc
                         best_model = copy.deepcopy(model)
-                        log.info(f"Best validation accuracy found: {best_valid_acc:.4f}\n")
+                        log.info(f"Best validation accuracy found: {best_val_acc:.4f}\n")
                         best_epoch = epoch
-                        # best_model_state = copy.deepcopy(model.state_dict())
-                        # torch.save(model.state_dict(), 'task-1-diff-bilstm-model.pth')
+
     except KeyboardInterrupt:
         pass
+
+    if args.tensorboard:
+        TB_train_log.close()
+        TB_validation_log.close()
 
     log.info('\nFinish training.')
     log.info(f'Best Epoch: {best_epoch}')

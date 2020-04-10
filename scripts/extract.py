@@ -40,9 +40,9 @@ for file in args.f:
             d[k] = config[k]
 
         val = re.findall("\[validation result(.*?)\]", raw)[0].replace('@@@@', '')
-        print(val)
+        #print(val)
         test = re.findall("\[test result(.*?)\]", raw)[0].replace('@@@@', '')
-        print(test)
+        #print(test)
         if args.task == 'task1':
             # val result
             pattern = 'RMSE: (.*).*RMSE@10: (.*).*RMSE@20: (.*).*RMSE@30: (.*).*RMSE@40: (.*)'

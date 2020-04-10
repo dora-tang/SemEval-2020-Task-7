@@ -24,25 +24,39 @@ we use the [transformers library by HuggingFace](https://github.com/huggingface/
 ```bash
 
 # put cache directory in bash_profile (mac) bashrc (linux)
-#HUGGINGFACE_TRANSFORMERS_CACHE=/share/data/speech/Data/sjin/data/cache/transformers
-#HUGGINGFACE_TRANSFORMERS_CACHE=/Users/jinshuning/Documents/Github/data/cache/transformers
-HUGGINGFACE_TRANSFORMERS_CACHE=[define your cache directory here]
-case "$(uname -s)" in
-  Darwin)
-    echo export HUGGINGFACE_TRANSFORMERS_CACHE="$HUGGINGFACE_TRANSFORMERS_CACHE" >> ~/.bash_profile
-    source ~/.bash_profile
-  ;;
-  Linux)
-    echo export HUGGINGFACE_TRANSFORMERS_CACHE="$HUGGINGFACE_TRANSFORMERS_CACHE" >> ~/.bashrc
-    source ~/.bashrc
-  ;;
-  *)
-    echo 'Automatic path setup is only configured for MacOS and Linux.'
-  ;;
-esac
+#CACHE=/share/data/speech/Data/sjin/data/cache/transformers
+#CACHE=/Users/jinshuning/Documents/Github/data/cache/transformers
+CACHE=[define your cache directory here]
+bash scripts/path_setup.sh HUGGINGFACE_TRANSFORMERS_CACHE $CACHE
 ```
 
 ## 2 Data
 - see *data* directory
 - datasets: **Humicroedit** (official task data) and **Funlines** (additional data)
-- source: https://www.cs.rochester.edu/u/nhossain/humicroedit.html
+- you can download the data from the [source website](https://www.cs.rochester.edu/u/nhossain/humicroedit.html), or simply run `bash scripts/download_data.sh`. This is the same data as in data directory.
+
+
+## 3 Experiment output
+```
+experiment_directory
+├── log.log
+├── params.json
+# if args.save_model
+├── model_state.th
+# if args.tensorboard
+├── tensorboard_train
+├── tensorboard_val
+# if args.do_eval
+└── output-{eval_data_name}.csv
+```
+
+To see tensorboard output:
+```bash
+open http://localhost:6006
+tensorboard --logdir tensorboard_train
+# you may need to wait a few seconds and refresh the page
+
+open http://localhost:6006
+tensorboard --logdir tensorboard_val
+# you may need to wait a few seconds and refresh the page
+```

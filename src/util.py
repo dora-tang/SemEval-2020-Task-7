@@ -18,8 +18,11 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torch.nn as nn
 from torch.nn.utils.clip_grad import clip_grad_norm_
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # must import before torchtext.data, otherwise will override name
+from transformers import get_linear_schedule_with_warmup
+from transformers import AdamW as huggingface_AdamW
 from transformers import *
 
 from torchtext import data
@@ -27,12 +30,19 @@ from torchtext.vocab import Vectors
 from torchtext.vocab import GloVe
 
 from allennlp.modules.scalar_mix import ScalarMix
+from metrics import *
+
 
 # from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, PackedSequence
 # import _pickle as pkl
 # print = log.info
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ImportError:
+    from tensorboardX import SummaryWriter
 
 
 def seed_all(seed):
@@ -131,26 +141,6 @@ def load_word_embedding(TEXT, train_data):
     return TEXT, embedding
 
 
-class RMSE():
-    def __init__(self):
-        self.n_instance = 0
-        self.sum_of_square = 0
-
-    def accumulate(self, sse, num):
-        self.sum_of_square += sse
-        self.n_instance += num
-
-    def calculate(self, clear=True):
-        rmse = np.sqrt(self.sum_of_square / self.n_instance)
-        if clear:
-            self._clear()
-        return rmse
-
-    def _clear(self):
-        self.n_instance = 0
-        self.sum_of_square = 0
-
-
 def args_default_path(args, default_data_dir):
     def default_path(path, default_path):
         if len(path) == 0:
@@ -211,3 +201,43 @@ def get_task(args, get_dataset, text_field, mask_token):
     task = read_task(train_path=train_path_list, val_path=val_path, test_without_label_path=test_without_label_path,
                      test_with_label_path=test_with_label_path)
     return task
+
+
+class Scheduler():
+    def __init__(self, args, optimizer):
+        if args.schedule == 'linear_schedule_with_warmup':
+            #t_total = math.ceil(len(task['train_data']) / args.bsz) * args.epochs
+            warmup_steps = 0
+            scheduler = get_linear_schedule_with_warmup(
+                optimizer, num_warmup_steps=warmup_steps, num_training_steps=args.t_total)
+
+        elif args.schedule == 'reduce_on_plateau':
+            if args.task == 'task1':
+                mode = "min"
+            elif args.task == 'task2':
+                mode = "max"
+            scheduler = ReduceLROnPlateau(optimizer, mode=mode, factor=0.5,
+                                          patience=3, min_lr=0, threshold=0.0001)
+
+        elif args.schedule == 'none':
+            scheduler = None
+
+        self.schedule = args.schedule
+        self.scheduler = scheduler
+
+    def step(self, val_loss=None):
+        if self.schedule == 'linear_schedule_with_warmup' and val_loss is None:
+            self.scheduler.step()
+
+        elif self.schedule == 'reduce_on_plateau' and val_loss is not None:
+            self.scheduler.step(val_loss)
+            log.info(
+                "\t# validation passes without improvement: %d",
+                self.scheduler.num_bad_epochs,
+            )
+
+    # def get_lr(self):
+    #     return self.scheduler.get_lr()
+    #
+    #     # elif self.schedule == 'none':
+    #     #     pass

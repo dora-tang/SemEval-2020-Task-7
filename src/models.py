@@ -40,6 +40,10 @@ class Pooler(nn.Module):
         self.project = nn.Linear(d_inp, d_proj) if project else lambda x: x
         self.pool_type = pool_type
 
+        if self.pool_type == 'attn':
+            d_in = d_proj if project else d_inp
+            self.attn = nn.Linear(d_in, 1, bias=False)
+
     def forward(self, sequence, mask=None):
         """
         sequence: (bsz, T, d_inp)
@@ -67,7 +71,59 @@ class Pooler(nn.Module):
             proj_seq = proj_seq.masked_fill(pad_mask, 0)
             seq_emb = proj_seq.sum(dim=1) / mask.sum(dim=1).float()
 
+        elif self.pool_type == 'attn':
+            # (bsz, T)
+            # dot product attention
+            scores = self.attn(proj_seq).squeeze()
+            pad_mask = (mask == 0).squeeze()
+            scores = scores.masked_fill(pad_mask, -1e9)
+            attn_weights = torch.softmax(scores, dim=1)
+            # (bsz, D) = (bsz, 1, T) * (bsz, T, D)
+            seq_emb = torch.matmul(attn_weights.unsqueeze(1), proj_seq).squeeze()
+
         return seq_emb
+
+
+def get_span_mask(span, sent_len, mode='range', include_start=True, include_end=True,):
+    """
+    span: tensor (bsz * 2), last dimension is [start_index, end_index], index range in [0, sent_len-1]
+    sent_len: int
+    mode: 'end_point' or 'range'
+    return: a boolean mask tensor, where index in span is True
+
+    example 1:
+        span = [[0,3],[1,4]], sent_len=5, include_start=False, include_end=False, mode='range'
+        return span_mask = [[False,True,True,False,False],[False,False,True,True,False]]
+    example 2:
+        span = [[0,3],[1,4]], sent_len=5, include_start=True, include_end=True, mode='range'
+        return span_mask = [[True,True,True,True,False],[False,True,True,True,True]]
+    example 3:
+        span = [[0,3],[1,4]], sent_len=5, include_start=False, include_end=False, mode='end_point'
+        return span_mask = [[False,True,True,False,False],[False,False,True,True,False]]
+    example 4:
+        span = [[0,3],[1,4]], sent_len=5, include_start=True, include_end=True, mode='end_point'
+        return span_mask = [[True,False,False,True,False],[False,True,False,False,True]]
+    """
+
+    bsz = span.shape[0]
+    index_tensor = torch.tensor(list(range(sent_len))).unsqueeze(0).expand(bsz, sent_len)
+    start_index, end_index = span.split(1, dim=-1)
+
+    if not include_start:
+        start_index = start_index + 1
+    if not include_end:
+        end_index = end_index - 1
+
+    if mode == 'range':
+        start_mask = (index_tensor - start_index) >= 0
+        end_mask = (index_tensor - end_index) <= 0
+        span_mask = start_mask & end_mask
+    elif mode == 'end_point':
+        start_mask = (index_tensor - start_index) == 0
+        end_mask = (index_tensor - end_index) == 0
+        span_mask = start_mask | end_mask
+
+    return span_mask
 
 
 """ core modules """
@@ -268,11 +324,13 @@ class PretrainedTransformer(nn.Module):
             hidden = last_hidden_state
 
         span = torch.nonzero(input=sep_mask, as_tuple=True)[1].view(-1, 2)
-        pool_mask = torch.zeros_like(sep_mask)
-        for row, (start, end) in enumerate(span):
-            pool_mask[row][start+1: end].fill_(1)
-        pool_mask = pool_mask.bool()
-        out = self.pooler(hidden, pool_mask)
+        # pool_mask = torch.zeros_like(sep_mask)
+        # for row, (start, end) in enumerate(span):
+        #     pool_mask[row][start+1: end].fill_(1)
+        # pool_mask = pool_mask.bool()
+        span_mask = get_span_mask(
+            span=span, sent_len=inp.shape[-1], include_start=False, include_end=False)
+        out = self.pooler(hidden, span_mask)
         # out2 = self.pooler(hidden, pool_mask == 0)
         return out
 
@@ -283,6 +341,7 @@ class PretrainedTransformer(nn.Module):
         m = [q1, q2, (q1-q2).abs(), q1*q2]
         pair_emb = torch.cat(m, dim=-1)
         score = self.classifier(pair_emb).squeeze()
+        # print(score)
         return score
 
     def forward_task1(self, batch):

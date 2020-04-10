@@ -25,13 +25,13 @@ def baseline_task_2(train_loc, test_loc):
 
     counts = train['label'].value_counts(sort=False)
     #counts = train['label'].value_counts()
-    pred = np.argmax(counts)
-    print(f'Count: {dict(counts)}\n')
-    print(f'Most frequent label in training set: {pred}\n')
+    pred = np.argmax(counts.values)
+    print(f'Count: {dict(counts)}')
+    print(f'Most frequent label in training set: {pred}')
     test['pred'] = pred
 
     output = test[['id', 'pred']]
-    out_loc = '../output/task-2-output.csv'
+    out_loc = '../baseline_output/task-2-output.csv'
     output.to_csv(out_loc, index=False)
 
     print('Output file created:\n\t- '+os.path.abspath(out_loc))
