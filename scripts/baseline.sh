@@ -1,27 +1,65 @@
+
 CODE_DIR=../code
 DATA_DIR=../data
 
 PRED_DIR=../baseline_output
 mkdir -p $PRED_DIR
+CODE_DIR2=../src
+
+
 
 # run baseline 1
 echo "Task 1 Baseline"
 
-python $CODE_DIR/baseline_task_1.py $DATA_DIR/task-1/train.csv $DATA_DIR/task-1/dev.csv
+echo
+echo "dev"
+
+PRED=$PRED_DIR/task-1-dev-output.csv
 GOLD=$DATA_DIR/task-1/dev.csv
-PRED=$PRED_DIR/task-1-output.csv
+
+python $CODE_DIR/baseline_task_1.py $DATA_DIR/task-1/train.csv $GOLD $PRED
+head -10 $PRED
 python $CODE_DIR/score_task_1.py $GOLD $PRED
-head $PRED -n 5
+python $CODE_DIR2/evaluate_output.py task1 $GOLD $PRED
 # RMSE = 0.578
 
 echo
+echo "test"
+
+PRED=$PRED_DIR/task-1-test-output.csv
+GOLD=$DATA_DIR/task-1/test_with_label.csv
+
+python $CODE_DIR/baseline_task_1.py $DATA_DIR/task-1/train.csv $GOLD $PRED
+head -10 $PRED
+python $CODE_DIR/score_task_1.py $GOLD $PRED
+python $CODE_DIR2/evaluate_output.py task1 $GOLD $PRED
+# 0.574710
+
 
 # run baseline 2
+echo
 echo "Task 2 Baseline"
-mkdir -p ../output
-python $CODE_DIR/baseline_task_2.py $DATA_DIR/task-2/train.csv $DATA_DIR/task-2/dev.csv
+
+echo
+echo "dev"
+
+PRED=$PRED_DIR/task-2-dev-output.csv
 GOLD=$DATA_DIR/task-2/dev.csv
-PRED=$PRED_DIR/task-2-output.csv
+
+python $CODE_DIR/baseline_task_2.py $DATA_DIR/task-2/train.csv $GOLD $PRED
+head -10 $PRED
 python $CODE_DIR/score_task_2.py $GOLD $PRED
-head $PRED -n 5
+python $CODE_DIR2/evaluate_output.py task2 $GOLD $PRED
 # Accuracy = 0.514
+
+echo
+echo "test"
+
+PRED=$PRED_DIR/task-2-test-output.csv
+GOLD=$DATA_DIR/task-2/test_with_label.csv
+
+python $CODE_DIR/baseline_task_2.py $DATA_DIR/task-2/train.csv $GOLD $PRED
+head -10 $PRED
+python $CODE_DIR/score_task_2.py $GOLD $PRED
+python $CODE_DIR2/evaluate_output.py task2 $GOLD $PRED
+# 0.490487
