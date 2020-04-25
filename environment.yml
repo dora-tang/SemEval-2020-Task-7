@@ -7,7 +7,7 @@ dependencies:
     - torchtext==0.5.0
     - numpy=1.16.4
     - pandas=1.0.3
-    - scikit-learn=0.22.2
+    - scikit-learn=0.22.1
     - pip
     - pip:
         - transformers==2.6.0
