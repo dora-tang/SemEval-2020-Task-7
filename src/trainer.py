@@ -49,8 +49,11 @@ class Trainer(object):
             optimizer = optim.Adam(
                 model.parameters(), lr=args.lr, eps=args.adam_epsilon
             )
+        # default: weight_decay=0.01
         elif args.optimizer == "pytorch_adamw":
             optimizer = AdamW(model.parameters(), lr=args.lr, eps=args.adam_epsilon)
+
+        # default: weight_decay=0
         elif args.optimizer == "huggingface_adamw":
             optimizer = huggingface_AdamW(
                 model.parameters(), lr=args.lr, eps=args.adam_epsilon
@@ -68,11 +71,6 @@ class Trainer(object):
 
         self._init_scorers()
 
-        # # scheduler
-        # args.t_total = math.ceil(len(task.train_data) / args.bsz) * args.epochs
-        # # args.t_total = len(train_iterator) * args.epochs
-        # self.scheduler = Scheduler(args, self.optimizer)
-
     def train_loop(self, args, task):
 
         train_iterator = data.BucketIterator(
@@ -89,15 +87,13 @@ class Trainer(object):
         best_epoch = -1
 
         # scheduler
-        # args.t_total = math.ceil(len(task.train_data) / args.bsz) * args.epochs
         args.t_total = len(train_iterator) * args.epochs
         self.scheduler = Scheduler(args, self.optimizer)
 
         try:
             for epoch in range(1, args.epochs + 1):
                 log.info(f"\nEpoch: {epoch:02}")
-                for k in scorers:
-                    scorers[k].reset()
+                [scorers[k].reset() for k in scorers]
 
                 # scorer.reset()
 
@@ -130,12 +126,11 @@ class Trainer(object):
                             tr_metrics_dict.update(scorers[k].get_metrics(reset=False))
 
                         # log train metric
-                        log_template = []
-                        for k, v in tr_metrics_dict.items():
-                            log_template += [f"{k}: {v:.4f}"]
+                        log_template = [
+                            f"{k}: {v:.4f}" for k, v in tr_metrics_dict.items()
+                        ]
                         log_string = " | ".join(log_template)
-                        phase = "Train"
-                        log.info(f"{phase:<10} | " + log_string)
+                        log.info(f"{'Train':<10} | " + log_string)
 
                         # log train metric to tensorboard
                         if args.tensorboard:
@@ -261,12 +256,9 @@ class Trainer1(Trainer):
 
             metrics = scorer.get_metrics(reset=False)
 
-            log_template = []
-            for k, v in metrics.items():
-                log_template += [f"{k}: {v:.4f}"]
+            log_template = [f"{k}: {v:.4f}" for k, v in metrics.items()]
             log_string = " | ".join(log_template)
-            phase = "Validation"
-            log.info(f"{phase:<10} | " + log_string)
+            log.info(f"{'Validation':<10} | " + log_string)
 
         return metrics
 
@@ -374,7 +366,6 @@ class Trainer2(Trainer):
             device=device,
         )
 
-        # criterion = nn.MSELoss(reduction='sum')
         cls_scorer = ClassificationMetrics(loss=True, acc_reward=True, f1=False)
         reg_scorer = RegressionMetrics(
             loss=False, rmse=True, rmse_plus=False, spearman=True, pearson=True
@@ -419,14 +410,10 @@ class Trainer2(Trainer):
             metrics.update(cls_metrics)
             metrics.update(reg_metrics)
 
-            log_template = []
-            for k, v in metrics.items():
-                log_template += [f"{k}: {v:.4f}"]
-            log_string = " | ".join(log_template)
-
             # log metrics
-            phase = "Validation"
-            log.info(f"{phase:<10} | " + log_string)
+            log_template = [f"{k}: {v:.4f}" for k, v in metrics.items()]
+            log_string = " | ".join(log_template)
+            log.info(f"{'Validation':<10} | " + log_string)
         return metrics
 
     @staticmethod

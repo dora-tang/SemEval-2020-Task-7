@@ -71,15 +71,15 @@ class Pooler(nn.Module):
             proj_seq = proj_seq.masked_fill(pad_mask, 0)
             seq_emb = proj_seq.sum(dim=1) / mask.sum(dim=1).float()
 
-        elif self.pool_type == "attn":
-            # (bsz, T)
-            # dot product attention
-            scores = self.attn(proj_seq).squeeze()
-            pad_mask = (mask == 0).squeeze()
-            scores = scores.masked_fill(pad_mask, -1e9)
-            attn_weights = torch.softmax(scores, dim=1)
-            # (bsz, D) = (bsz, 1, T) * (bsz, T, D)
-            seq_emb = torch.matmul(attn_weights.unsqueeze(1), proj_seq).squeeze()
+        # elif self.pool_type == "attn":
+        #     # (bsz, T)
+        #     # dot product attention
+        #     scores = self.attn(proj_seq).squeeze()
+        #     pad_mask = (mask == 0).squeeze()
+        #     scores = scores.masked_fill(pad_mask, -1e9)
+        #     attn_weights = torch.softmax(scores, dim=1)
+        #     # (bsz, D) = (bsz, 1, T) * (bsz, T, D)
+        #     seq_emb = torch.matmul(attn_weights.unsqueeze(1), proj_seq).squeeze()
 
         return seq_emb
 
@@ -87,9 +87,9 @@ class Pooler(nn.Module):
 def get_span_mask(
     span: torch.Tensor,
     sent_len: int,
-    mode="range",
-    include_start=True,
-    include_end=True,
+    mode: str = "range",
+    include_start: bool = True,
+    include_end: bool = True,
 ) -> torch.Tensor:
     """
     Args:
@@ -173,7 +173,7 @@ class CBOW(nn.Module):
         pooled_emb = pooler(emb)
         return pooled_emb
 
-    def predict_edit_score(self, new_word, old_word="", context=""):
+    def predict_edit_score(self, new_word, old_word=None, context=None):
         # mean pooling
         q1 = self.words2vec(new_word, self.pooler_mean)
         # max pooling
@@ -192,7 +192,6 @@ class CBOW(nn.Module):
 
         out = {}
         out["pred_score"] = score
-        # print(batch)
         if hasattr(batch, "meanGrade"):
             criterion = nn.MSELoss(reduction="sum")
             out["loss"] = criterion(score, batch.meanGrade)
@@ -293,7 +292,7 @@ class PretrainedTransformer(nn.Module):
         outputs = self.transformer(inp, attention_mask=inp_mask)
         last_hidden_state, pooler_output, hidden_states = outputs
 
-        if self.self.scalar_mix is not None:
+        if self.scalar_mix is not None:
             hidden = self.scalar_mix(hidden_states)
         else:
             hidden = last_hidden_state
@@ -325,6 +324,8 @@ class PretrainedTransformer(nn.Module):
 
         out = {}
         out["pred_score"] = score
+
+        # if meanGrade1" in batch
         if hasattr(batch, "meanGrade"):
             criterion = nn.MSELoss(reduction="sum")
             out["loss"] = criterion(score, batch.meanGrade)
@@ -350,7 +351,8 @@ class PretrainedTransformer(nn.Module):
         )
 
         out = {"pred_score1": score1, "pred_score2": score2, "pred_label": label}
-        # if "label" in batch and "meanGrade1" in batch and "meanGrade2" in batch:
+
+        # if "label" in batch and "meanGrade1" in batch and "meanGrade2" in batch
         if hasattr(batch, "label"):
             criterion = nn.MSELoss(reduction="sum")
             loss1 = criterion(prediction1, batch.meanGrade1)

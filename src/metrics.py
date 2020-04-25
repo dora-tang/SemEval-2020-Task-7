@@ -103,7 +103,7 @@ class RMSEPlus(object):
             # top n % + bottom n %
             df2 = df[:size].append(df[-size:])
             rmse = np.sqrt(np.mean((df2["real"] - df2["pred"]) ** 2))
-            metrics[f"rmse_{percent}"] = rmse
+            metrics[f"rmse{percent}"] = rmse
         if reset:
             self.reset()
 

@@ -32,8 +32,7 @@ from torchtext.vocab import Vectors, GloVe
 from allennlp.modules.scalar_mix import ScalarMix
 
 from metrics import *
-from code.score_task_1 import score_task_1
-from code.score_task_2 import score_task_2
+
 
 
 # from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, PackedSequence

@@ -2,6 +2,8 @@ from util import *
 from models import *
 from trainer import *
 from tasks import *
+from code.score_task_1 import score_task_1
+from code.score_task_2 import score_task_2
 
 
 def parse_args(cl_args):
@@ -70,7 +72,7 @@ def parse_args(cl_args):
     )
     parser.add_argument("-lr", type=float, default=1e-3, help="learning rate")
     parser.add_argument(
-        "-adam_epsilon", default=1e-8, type=float, help="Epsilon for Adam optimizer."
+        "-adam_epsilon", default=1e-8, type=float, help="epsilon for Adam optimizer."
     )
     """ scheduler """
     parser.add_argument(
@@ -144,6 +146,7 @@ if args.do_train:
             del args_dict[k]
 
         json.dump(args_dict, conf, indent=2)
+
 elif args.do_eval or args.do_predict:
     # assert experiment directory exists
     assert os.path.isdir(exp_dir)
@@ -154,12 +157,10 @@ elif args.do_eval or args.do_predict:
     log.info("\n\n======================================== ")
     with open(config_path, "r") as conf:
         args_dict = json.load(conf)
-        # log.info(args_dict)
         for k, v in args_dict.items():
             vars(args)[k] = v
 
 args_json = json.dumps(vars(args), indent=2)
-
 log.info(f"Arguments: {args_json}")
 log.info(f"Device: {device}")
 
@@ -201,7 +202,6 @@ if args.model == "cbow":
     embedding.weight.requires_grad = bool(args.finetune)
     PAD_IDX = TEXT.vocab.stoi[TEXT.pad_token]
     model = CBOW(embedding, pad_idx=PAD_IDX, feature=args.feature, mode=args.task,)
-    # optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
 
 elif args.model == "transformer":
@@ -213,7 +213,6 @@ elif args.model == "transformer":
         pad_token_id=tokenizer.pad_token_id,
         sep_token_id=tokenizer.sep_token_id,
     )
-    # optimizer = huggingface_AdamW(model.parameters())
 
 """ Training """
 
@@ -221,9 +220,12 @@ if args.do_train:
     log.info(f"The model has {count_parameters(model)} trainable parameters")
     trainer = trainer_class(args, model)
     best_model = trainer.train_loop(args, task)
-    log.info("\n[validation result")
-    trainer_class.evaluate(args, best_model, task.val_data)
-    log.info("]")
+
+    val_metrics = trainer_class.evaluate(args, best_model, task.val_data)
+    val_metrics = {k: np.around(float(v), 6) for k, v in val_metrics.items()}
+    val_json = json.dumps(val_metrics, indent=2)
+    log.info(f"\nvalidation result: {val_json}")
+
 
     # save model
     if args.save_model:
@@ -243,9 +245,10 @@ if args.do_eval:
     log.info(f"Evaluate: {args.test_with_label_path}")
 
     # eval
-    log.info("\n[test result")
-    trainer_class.evaluate(args, model, task.test_with_label_data)
-    log.info("]")
+    test_metrics = trainer_class.evaluate(args, model, task.test_with_label_data)
+    test_metrics = {k: np.around(float(v), 6) for k, v in test_metrics.items()}
+    test_json = json.dumps(test_metrics, indent=2)
+    log.info(f"\ntest result: {test_json}")
 
     # write prediciton for analysis
     log.info("")
