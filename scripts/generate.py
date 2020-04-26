@@ -4,29 +4,52 @@ import sys
 task = sys.argv[1]
 
 # generate command for task1
-if task == 1:
-    prefix = 'python main.py -task task1 -epochs 10 -lr 0.001 -bsz 32 -do_train -do_eval -save_model -track'
+if task == "1":
+    prefix = 'python main.py -task task1 -bsz 32 -do_train -do_eval -save_model -track -tensorboard '
 
 # generate command for task2
-elif task == 2:
-    prefix = 'python main.py -task task2 -epochs 10 -lr 0.001 -bsz 16 -do_train -do_eval -save_model -track'
+elif task == "2":
+    prefix = 'python main.py -task task2 -bsz 16 -do_train -do_eval -save_model -track -tensorboard '
 
 
-param_base = {
-    "feature": ['edit-context', 'edit-original'],
-    "finetune": [0, 1],
-    "train_extra": [0, 1],
-    "seed": [1],
-}
+param_base = dict(
+    feature = ['edit-context', 'edit-original'],
+    train_extra = [0, 1],
+    seed = [1],
+)
 
-param1 = {"model": ['cbow'], }
+# transformer_finetune
+param1 = dict(
+    model = ['transformer'],
+    transformer = ['roberta-base', 'bert-base-uncased'],
+    finetune = [1],
+    lr = [2e-5, 5e-5],
+    schedule = ['none', 'linear_schedule_with_warmup'],
+    epoch = [3, 10],
+)
 param1.update(param_base)
 
-param2 = {
-    "model": ['transformer'],
-    "transformer": ['roberta-base', 'bert-base-uncased'],
-}
+# transformer_freeze
+param2 = dict(
+    model = ['transformer'],
+    transformer = ['roberta-base', 'bert-base-uncased'],
+    finetune = [0],
+    lr = [ 1e-3, 3e-4],
+    schedule = ['none',],
+    epoch = [10],
+)
 param2.update(param_base)
+
+
+#cbow_freeze_and_finetune
+param3 = dict(
+    model = ['cbow'],
+    finetune = [0, 1],
+    lr = [1e-3, 3e-4],
+    schedule  = ["none"],
+    epoch = [10],
+)
+param3.update(param_base)
 
 
 def generate(param):
@@ -40,16 +63,18 @@ def generate(param):
             model = d['transformer']
         else:
             model = d['model']
-        exp = f"{model}_{d['feature']}_fintune{d['finetune']}_extra{d['train_extra']}_seed{d['seed']}"
+        exp = "_".join([f"{k}_{v}" for k, v in d.items()])
+        exp = exp.replace('model_cbow', 'cbow').replace('model_transformer_transformer_', '').replace('train_extra', 'extra')
         d['exp'] = exp
         cl = prefix + " ".join([f'-{k} {v}' for k, v in d.items()])
-        # d_list.append(d)
         print(cl)
         cl_list.append(cl)
     return cl_list
 
 
-print('# cbow')
+print('# transformer_finetue')
 l1 = generate(param1)
-print('# transformer')
+print('# transformer_freeze')
 l2 = generate(param2)
+print('# cbow all')
+l3 = generate(param3)

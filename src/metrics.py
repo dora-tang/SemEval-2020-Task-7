@@ -1,18 +1,24 @@
+from typing import Dict, Iterable, List, Sequence, Tuple, Union, Optional
+from overrides import overrides
+
 import numpy as np
 import pandas as pd
+from scipy.stats import pearsonr, spearmanr
 import math
-from typing import Dict, Iterable, List, Sequence, Tuple, Union, Optional
 
 import torch
-from allennlp.training.metrics import (
-    Average,
-    BooleanAccuracy,
-    CategoricalAccuracy,
-    F1Measure,
-)
+
 from allennlp_mods.correlation import *
+from allennlp.training.metrics.metric import Metric, F1Measure
+
 
 # from allennlp.training.metrics.metric import Metric, PearsonCorrelation, SpearmanCorrelation
+# from allennlp.training.metrics import (
+#     Average,
+#     BooleanAccuracy,
+#     CategoricalAccuracy,
+#     F1Measure,
+# )
 
 
 class RMSE(object):

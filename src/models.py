@@ -355,8 +355,8 @@ class PretrainedTransformer(nn.Module):
         # if "label" in batch and "meanGrade1" in batch and "meanGrade2" in batch
         if hasattr(batch, "label"):
             criterion = nn.MSELoss(reduction="sum")
-            loss1 = criterion(prediction1, batch.meanGrade1)
-            loss2 = criterion(prediction2, batch.meanGrade2)
+            loss1 = criterion(score1, batch.meanGrade1)
+            loss2 = criterion(score2, batch.meanGrade2)
             loss = loss1 + loss2
             out["loss"] = loss
         return out

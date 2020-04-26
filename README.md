@@ -35,6 +35,7 @@ python -m spacy download en
 we use the [transformers library by HuggingFace](https://github.com/huggingface/transformers). Save caches so you don't have to download the same model more than once.
 
 ```bash
+# replace `/path/to/cache/directory` with your directory
 CACHE=/path/to/cache/directory
 bash scripts/path_setup.sh HUGGINGFACE_TRANSFORMERS_CACHE $CACHE
 # this will add the following line to ~/.bash_profile (mac) or ~/.bashrc (linux)
