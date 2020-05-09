@@ -7,18 +7,70 @@ from scipy.stats import pearsonr, spearmanr
 import math
 
 import torch
-
-from allennlp_mods.correlation import *
-from allennlp.training.metrics.metric import Metric, F1Measure
+from allennlp.training.metrics import Metric, F1Measure
 
 
-# from allennlp.training.metrics.metric import Metric, PearsonCorrelation, SpearmanCorrelation
-# from allennlp.training.metrics import (
-#     Average,
-#     BooleanAccuracy,
-#     CategoricalAccuracy,
-#     F1Measure,
-# )
+# copied from the [github](https://github.com/nyu-mll/jiant/blob/master/jiant/allennlp_mods/correlation.py) of [jiant library](https://github.com/nyu-mll/jiant)
+@Metric.register("correlation")
+class Correlation(Metric):
+    """Aggregate predictions, then calculate specified correlation"""
+
+    def __init__(self, corr_type):
+        self._predictions = []
+        self._labels = []
+        if corr_type == "pearson":
+            corr_fn = pearsonr
+        elif corr_type == "spearman":
+            corr_fn = spearmanr
+        else:
+            raise ValueError("Correlation type not supported")
+        self._corr_fn = corr_fn
+        self.corr_type = corr_type
+
+    def _correlation(self, labels, predictions):
+        corr = self._corr_fn(labels, predictions)
+        if self.corr_type in ["pearson", "spearman"]:
+            corr = corr[0]
+        return corr
+
+    def __call__(self, predictions, labels):
+        """ Accumulate statistics for a set of predictions and labels.
+
+        Values depend on correlation type; Could be binary or multivalued. This is handled by sklearn.
+
+        Args:
+            predictions: Tensor or np.array
+            labels: Tensor or np.array of same shape as predictions
+        """
+        # Convert from Tensor if necessary
+        if isinstance(predictions, torch.Tensor):
+            predictions = predictions.detach().cpu().numpy()
+        if isinstance(labels, torch.Tensor):
+            labels = labels.detach().cpu().numpy()
+
+        # Verify shape match
+        assert predictions.shape == labels.shape, (
+            "Predictions and labels must"
+            " have matching shape. Got:"
+            " preds=%s, labels=%s" % (str(predictions.shape), str(labels.shape))
+        )
+
+        predictions = list(predictions.flatten())
+        labels = list(labels.flatten())
+
+        self._predictions += predictions
+        self._labels += labels
+
+    def get_metric(self, reset=False):
+        correlation = self._correlation(self._labels, self._predictions)
+        if reset:
+            self.reset()
+        return correlation
+
+    @overrides
+    def reset(self):
+        self._predictions = []
+        self._labels = []
 
 
 class RMSE(object):
