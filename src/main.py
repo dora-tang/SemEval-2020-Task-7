@@ -28,7 +28,7 @@ def parse_args(cl_args):
         "-feature",
         type=str,
         default="edit-context",
-        choices=["edit-context", "edit-original",],
+        choices=["edit-context", "edit-original", "edit"],
         help="",
     )
     """ dataset """
@@ -225,7 +225,6 @@ if args.do_train:
     val_metrics = {k: np.around(float(v), 6) for k, v in val_metrics.items()}
     val_json = json.dumps(val_metrics, indent=2)
     log.info(f"\nvalidation result: {val_json}")
-
 
     # save model
     if args.save_model:

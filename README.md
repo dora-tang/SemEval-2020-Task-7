@@ -1,28 +1,56 @@
-# semeval-humor
+# Duluth at SemEval-2020 Task 7
 
-[SemEval-2020 Task 7: Assessing Humor in Edited News Headlines](https://competitions.codalab.org/competitions/20970)
 
-## 1 Environment
+This is the codebase for our SemEval 2020 paper: **Duluth at SemEval-2020 Task 7: Using Surprise as a Key to Unlock Humorous Headlines**.
 
-(only need to configure this for the first time unless otherwise specified)
-
-First, you need to have [Anaconda 3](https://docs.anaconda.com/anaconda/install/) installed. Then create a [conda environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html) with required packages specified in `environment.yml`:
-
-```bash
-conda env create -f environment.yml
+```
+@inproceedings{duluth2020humor,
+    title = "Duluth at SemEval-2020 Task 7: Using Surprise as a Key to Unlock Humorous Headlines",
+    author = "Shuning Jin and Yue Yin and XianE Tang and Ted Pedersen",
+    booktitle = "Proceedings of the 14th International Workshop on Semantic Evaluation (SemEval 2020)",
+    year = "2020",
+}
 ```
 
-activate the environment (do this before running code)
 
-```bash
-conda activate humor # or source activate humor
-```
+## Task Introduction
 
-deactivate the environment (optionally do this after running code)
+SemEval-2020 Task 7: Assessing Humor in Edited News Headlines
+- [Competition page](https://competitions.codalab.org/competitions/20970)
+  - Subtask 1: regression task to predict the funniness score of an edited headline
+  - Subtask 2: classification task to predict the funnier between two edited headlines
+- Leaderboard for offical evaluation
+  - [webpage version](https://competitions.codalab.org/competitions/20970#results): “Evaluation-Task-1” is for Subtask 1 and “Evaluation-Task-2” is for Subtask 2.
+  - [cleaned csv version](code/official_evaluation_result.csv)
+  - **Our system** ranks 11/49 (0.531 RMSE) in Subtask 1, and 9/32 (0.632 accuracy) in Subtask 2.
 
-```bash
-conda deactivate # or source deactivate
-```
+
+
+## 1 Configuration
+
+**conda environment**
+
+- packages are specified in [environment.yml](environment.yml)
+
+- require conda3: [Anaconda 3](https://docs.anaconda.com/anaconda/install/) or [Miniconda 3](https://docs.conda.io/en/latest/miniconda.html)
+
+  - create [conda environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html):
+    ```bash
+    conda env create -f environment.yml
+    ```
+
+  - activate/deactivate the environment:
+    ```bash
+    # linux/mac (conda>=3.6):
+    conda activate humor
+    conda deactivate
+    # linux/mac (conda<3.6):
+    source activate humor
+    source deactivate
+    # windows:
+    activate humor
+    deactivate
+    ```
 
 **spaCy**
 
@@ -44,8 +72,8 @@ bash scripts/path_setup.sh HUGGINGFACE_TRANSFORMERS_CACHE $CACHE
 
 ## 2 Data
 
--   see `data` directory
--   datasets: [Humicroedit](https://www.aclweb.org/anthology/N19-1012/) (official task data) and [Funlines](https://arxiv.org/pdf/2002.02031.pdf) (additional data)
+-   see [data](data) directory
+-   datasets: [Humicroedit](https://www.aclweb.org/anthology/N19-1012/) (official task data) and [Funlines](https://arxiv.org/pdf/2002.02031.pdf) (additional training data)
 -   you can download the data from the [source website](https://www.cs.rochester.edu/u/nhossain/humicroedit.html), or simply run
     ```bash
     bash scripts/download_data.sh
@@ -78,10 +106,41 @@ tensorboard --logdir tensorboard_val
 ```
 
 ## 4 Scripts
+<!-- : [see here](scripts/table2) -->
 
-To get the baseline results, run
+- Baseline
+  - Baseline 1 uses the average score; Baseline 2 uses the majority label.
+  - output will be in `baseline_output` directory
 
-```bash
-cd scripts
-bash baseline.sh > ../baseline_output/results.log
-```
+    ```bash
+    bash scripts/baseline.sh > baseline_output/results.log
+    ```
+- To reproduce our **main experiment** based on the contrastive approach (Table 2 in the paper):
+
+  - produce the highlighted numbers (i.e., best within each model type), with this [script](scripts/table2_best.sh)
+
+    ```bash
+    bash scripts/table2_best.sh
+    ```
+
+  - produce the whole table, with this [script](scripts/table2.sh)
+
+    ```bash
+    bash scripts/table2.sh
+    ```
+
+  - Table 2
+  ![](scripts/img/table2.png)
+
+
+<!-- : [see here](scripts/table3) -->
+- To reproduce the additional analysis on the non-contrastive approach (Table 3 in the paper)
+
+  - use this [script](scripts/table3.sh)
+
+    ```bash
+    bash scripts/table3.sh
+    ```
+
+  - Table 3
+  ![](scripts/img/table3.png)

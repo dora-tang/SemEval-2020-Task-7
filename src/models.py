@@ -245,7 +245,7 @@ class PretrainedTransformer(nn.Module):
         sep_token_id=None,
     ):
         """
-        feature: edit-context, edit-original
+        feature: edit-context, edit-original, edit
         mode: task1, task2
         """
         super().__init__()
@@ -253,12 +253,15 @@ class PretrainedTransformer(nn.Module):
         self.pad_token_id = pad_token_id
         self.sep_token_id = sep_token_id
 
-        d_inp = transformer.config.hidden_size
-        d_cls = d_inp * 4
-        self.pooler = Pooler(project=False, d_inp=d_inp, pool_type="mean")
-
         self.feature = feature
         self.mode = mode
+
+        d_inp = transformer.config.hidden_size
+        if feature in ["edit-context", "edit-original"]:
+            d_cls = d_inp * 4
+        elif feature == "edit":
+            d_cls = d_inp
+        self.pooler = Pooler(project=False, d_inp=d_inp, pool_type="mean")
 
         if not finetune:
             self.scalar_mix = ScalarMix(
@@ -307,10 +310,13 @@ class PretrainedTransformer(nn.Module):
 
     def predict_edit_score(self, edit_sentence, auxilary_sentence):
         q1 = self.sent2vec(edit_sentence)
-        q2 = self.sent2vec(auxilary_sentence)
-        m = [q1, q2, (q1 - q2).abs(), q1 * q2]
-        pair_emb = torch.cat(m, dim=-1)
-        score = self.classifier(pair_emb).squeeze()
+        if auxilary_sentence is None:
+            emb = q1
+        else:
+            q2 = self.sent2vec(auxilary_sentence)
+            m = [q1, q2, (q1 - q2).abs(), q1 * q2]
+            emb = torch.cat(m, dim=-1)
+        score = self.classifier(emb).squeeze()
         # print(score)
         return score
 
@@ -319,6 +325,8 @@ class PretrainedTransformer(nn.Module):
             auxilary_sentence = batch.original
         elif self.feature == "edit-context":
             auxilary_sentence = batch.mask
+        elif self.feature == "edit":
+            auxilary_sentence = None
         edit_sentence = batch.new
         score = self.predict_edit_score(edit_sentence, auxilary_sentence)
 
@@ -345,6 +353,8 @@ class PretrainedTransformer(nn.Module):
             auxilary_sentence1, auxilary_sentence2 = batch.original1, batch.original2
         elif self.feature == "edit-context":
             auxilary_sentence1, auxilary_sentence2 = batch.mask1, batch.mask2
+        elif self.feature == "edit":
+            auxilary_sentence1, auxilary_sentence2 = None, None
         edit_sentence1, edit_sentence2 = batch.new1, batch.new2
         score1, score2, label = self.compare_edit_pair(
             edit_sentence1, edit_sentence2, auxilary_sentence1, auxilary_sentence2
