@@ -1,7 +1,7 @@
 # Duluth at SemEval-2020 Task 7
 
 
-This is the codebase for our SemEval 2020 paper: **Duluth at SemEval-2020 Task 7: Using Surprise as a Key to Unlock Humorous Headlines**.
+This is the codebase for our SemEval 2020 paper: [Duluth at SemEval-2020 Task 7: Using Surprise as a Key to Unlock Humorous Headlines](https://arxiv.org/abs/2009.02795).
 
 ```
 @inproceedings{duluth2020humor,
@@ -9,8 +9,10 @@ This is the codebase for our SemEval 2020 paper: **Duluth at SemEval-2020 Task 7
     author = "Shuning Jin and Yue Yin and XianE Tang and Ted Pedersen",
     booktitle = "Proceedings of the 14th International Workshop on Semantic Evaluation (SemEval 2020)",
     year = "2020",
+    url = "https://arxiv.org/abs/2009.02795"
 }
 ```
+
 
 
 ## Task Introduction
